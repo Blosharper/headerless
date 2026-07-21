@@ -1,0 +1,50 @@
+{
+  "name": "headerless",
+  "version": "0.0.0",
+  "description": "Strips format-defining header fields from binary assets at build time. Bundler-agnostic core.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "assets",
+    "binary",
+    "protection",
+    "datamining",
+    "capacitor",
+    "electron"
+  ],
+  "author": "firejune",
+  "license": "MIT",
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/firejune/headerless.git",
+    "directory": "packages/headerless"
+  },
+  "bugs": {
+    "url": "https://github.com/firejune/headerless/issues"
+  },
+  "homepage": "https://github.com/firejune/headerless#readme"
+}
