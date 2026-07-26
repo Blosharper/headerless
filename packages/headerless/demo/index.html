@@ -87,12 +87,12 @@
   <footer>
     Sample images are drawn on a <code>&lt;canvas&gt;</code> in your browser — nothing is bundled, every run differs.
     The "stripped" preview is the browser genuinely failing to decode the headerless bytes.
-    Serve from the repo root after <code>npm run build</code> (the page imports <code>packages/headerless/dist</code>).
+    In the repo: <code>npm run demo</code>. From npm: <code>npx serve node_modules/headerless</code> — the page imports the package's own <code>dist/</code>.
   </footer>
 </main>
 
 <script type="module">
-import { detect, strip, restore } from '../packages/headerless/dist/index.js'
+import { detect, strip, restore } from '../dist/index.js'
 
 const $ = id => document.getElementById(id)
 const urls = []
