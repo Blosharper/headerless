@@ -8,7 +8,10 @@ from *unzip* to *reverse-engineer*. Anything the renderer can see, a determined 
 can see too. That is by design, and the scope is stated up front so nobody mistakes this
 for protection it does not provide.
 
-> ⚠️ **WIP.** The API is not stable and the core operations are not implemented yet.
+> ⚠️ **0.x.** Implemented and dogfooding in a shipped commercial game; the API may still move before 0.1.0.
+>
+> **See it live**: `npm install && npm run demo`, then open <http://localhost:5180/demo/> — generate a sample
+> image (or drop your own) and watch it flow through original → stripped (undecodable) → restored, byte-identical.
 
 ## Packages
 
