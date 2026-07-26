@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>headerless — live demo</title>
+<style>
+  :root {
+    --bg: #14161c; --panel: #1c1f28; --line: #2c3040; --text: #d8dce8;
+    --dim: #8b91a7; --accent: #7aa2f7; --ok: #9ece6a; --bad: #f7768e; --warn: #e0af68;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px 20px 60px; background: var(--bg); color: var(--text);
+         font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  main { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h1 em { color: var(--accent); font-style: normal; }
+  .tagline { color: var(--dim); margin: 0 0 24px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+              background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+              padding: 14px 16px; margin-bottom: 14px; }
+  button { background: #262b3a; color: var(--text); border: 1px solid var(--line);
+           border-radius: 7px; padding: 7px 14px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  label { color: var(--dim); }
+  input[type=text] { background: #10121a; color: var(--text); border: 1px solid var(--line);
+                     border-radius: 7px; padding: 6px 10px; font: inherit; width: 150px; }
+  .drop { color: var(--dim); border: 1px dashed var(--line); border-radius: 7px;
+          padding: 6px 12px; }
+  .drop.over { border-color: var(--accent); color: var(--accent); }
+  #error { display: none; background: #2a1a20; border: 1px solid var(--bad); color: var(--bad);
+           border-radius: 10px; padding: 10px 16px; margin-bottom: 14px; white-space: pre-wrap; }
+  .pipeline { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  @media (max-width: 860px) { .pipeline { grid-template-columns: 1fr; } }
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px; min-height: 120px; }
+  .stage h2 { font-size: 13px; margin: 0 0 10px; color: var(--dim); text-transform: uppercase;
+              letter-spacing: 1px; }
+  .stage h2 .verdict { float: right; letter-spacing: 0; text-transform: none; }
+  .frame { position: relative; background: repeating-conic-gradient(#191c25 0% 25%, #20242f 0% 50%) 0 0/16px 16px;
+           border: 1px solid var(--line); border-radius: 7px; min-height: 150px;
+           display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .frame img { max-width: 100%; max-height: 200px; display: block; }
+  .frame .undecodable { color: var(--bad); text-align: center; padding: 18px; }
+  .frame .undecodable small { color: var(--dim); display: block; margin-top: 4px; }
+  .meta { margin: 10px 0 0; color: var(--dim); font-size: 12px; word-break: break-all; }
+  .meta b { color: var(--text); font-weight: 600; }
+  .hex { color: #a9b1d6; }
+  .hex .cut { color: var(--bad); }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  footer { color: var(--dim); margin-top: 26px; font-size: 12px; }
+  footer code { color: var(--text); }
+</style>
+</head>
+<body>
+<main>
+  <h1><em>headerless</em> — strip / restore, live</h1>
+  <p class="tagline">Not encryption, not DRM — the cut bytes are the per-file key. Watch a file stop decoding, then come back.</p>
+
+  <div class="controls">
+    <button data-gen="image/png">generate PNG</button>
+    <button data-gen="image/webp">generate WebP</button>
+    <button data-gen="image/jpeg">generate JPEG</button>
+    <span class="drop" id="drop">…or drop / pick your own image <input type="file" id="file" accept="image/*" hidden> </span>
+    <label>XOR key <input type="text" id="key" value="demo-key"></label>
+  </div>
+  <div id="error"></div>
+
+  <div class="pipeline">
+    <section class="stage" id="st-original">
+      <h2>1 · original</h2>
+      <div class="frame" id="f-original"><span class="undecodable" style="color:var(--dim)">generate or drop a file</span></div>
+      <p class="meta" id="m-original"></p>
+    </section>
+    <section class="stage" id="st-stripped">
+      <h2>2 · stripped <span class="verdict" id="v-stripped"></span></h2>
+      <div class="frame" id="f-stripped"></div>
+      <p class="meta" id="m-stripped"></p>
+    </section>
+    <section class="stage" id="st-restored">
+      <h2>3 · restored <span class="verdict" id="v-restored"></span></h2>
+      <div class="frame" id="f-restored"></div>
+      <p class="meta" id="m-restored"></p>
+    </section>
+  </div>
+
+  <footer>
+    Sample images are drawn on a <code>&lt;canvas&gt;</code> in your browser — nothing is bundled, every run differs.
+    The "stripped" preview is the browser genuinely failing to decode the headerless bytes.
+    Serve from the repo root after <code>npm run build</code> (the page imports <code>packages/headerless/dist</code>).
+  </footer>
+</main>
+
+<script type="module">
+import { detect, strip, restore } from '../packages/headerless/dist/index.js'
+
+const $ = id => document.getElementById(id)
+const urls = []
+const blobUrl = (bytes, type) => {
+  const u = URL.createObjectURL(new Blob([bytes], { type }))
+  urls.push(u)
+  return u
+}
+const MIME = { png: 'image/png', webp: 'image/webp', jpeg: 'image/jpeg' }
+const hex = (bytes, n, cutLen = 0) => {
+  const parts = []
+  for (let i = 0; i < Math.min(n, bytes.length); i++) {
+    const b = bytes[i].toString(16).padStart(2, '0')
+    parts.push(i < cutLen ? `<span class="cut">${b}</span>` : b)
+  }
+  return `<span class="hex">${parts.join(' ')}${bytes.length > n ? ' …' : ''}</span>`
+}
+const kb = n => `${n.toLocaleString()} B`
+
+function showError(msg) { const el = $('error'); el.style.display = 'block'; el.textContent = msg }
+function clearError() { $('error').style.display = 'none' }
+
+function preview(frameId, bytes, type, { expectBroken = false } = {}) {
+  const frame = $(frameId)
+  frame.innerHTML = ''
+  const img = new Image()
+  img.src = blobUrl(bytes, type)
+  img.onerror = () => {
+    frame.innerHTML = `<div class="undecodable">✂ undecodable<small>the browser cannot parse these bytes${expectBroken ? ' — that is the point' : ''}</small></div>`
+  }
+  frame.appendChild(img)
+}
+
+function run(name, original) {
+  clearError()
+  urls.splice(0).forEach(u => URL.revokeObjectURL(u))
+  const keyBytes = new TextEncoder().encode($('key').value || 'demo-key')
+  const format = detect(original)
+
+  preview('f-original', original, format ? MIME[format] : 'application/octet-stream')
+  $('m-original').innerHTML =
+    `<b>${name}</b> · ${kb(original.length)} · detected: <b>${format ?? 'unknown'}</b><br>${hex(original, 16)}`
+
+  for (const id of ['m-stripped', 'm-restored', 'v-stripped', 'v-restored']) $(id).innerHTML = ''
+  for (const id of ['f-stripped', 'f-restored']) $(id).innerHTML = ''
+
+  let fragment, body
+  try {
+    ;({ fragment, body } = strip(original, name, keyBytes))
+  } catch (err) {
+    let msg = String(err)
+    if (name.startsWith('sample.') && msg.includes('VP8X')) {
+      msg += '\n\nℹ Chromium\'s canvas encoder emits extended WebP — the refusal you just saw IS the guard working. ' +
+        'Drop a plain lossy/lossless .webp (e.g. cwebp output) to see the WebP happy path, or use the PNG/JPEG buttons.'
+    }
+    showError(msg)
+    return
+  }
+
+  // The cut region is gone — for JPEG it sits mid-file, for PNG/WebP at byte 0.
+  preview('f-stripped', body, format ? MIME[format] : '', { expectBroken: true })
+  $('v-stripped').innerHTML = `<span class="bad">−${fragment.length} B cut</span>`
+  $('m-stripped').innerHTML =
+    `body ${kb(body.length)} · first bytes now:<br>${hex(body, 16)}<br>` +
+    `fragment (XOR-masked, <b>${fragment.data.length} B</b> stored @ offset ${fragment.start}):<br>${hex(fragment.data, 24, 24)}`
+
+  const rebuilt = restore(fragment, body, keyBytes)
+  const identical = rebuilt.length === original.length && rebuilt.every((b, i) => b === original[i])
+  preview('f-restored', rebuilt, format ? MIME[format] : '')
+  $('v-restored').innerHTML = identical
+    ? '<span class="ok">byte-identical ✓</span>'
+    : '<span class="bad">MISMATCH ✗</span>'
+  $('m-restored').innerHTML = `${kb(rebuilt.length)} · ${hex(rebuilt, 16, fragment.start === 0 ? fragment.length : 0)}`
+}
+
+// --- sample generation: the canvas is the asset factory, nothing is bundled ---
+function makeSample(type) {
+  const c = document.createElement('canvas')
+  c.width = 480; c.height = 280
+  const g = c.getContext('2d')
+  const hue = Math.floor(Math.random() * 360)
+  const grad = g.createLinearGradient(0, 0, 480, 280)
+  grad.addColorStop(0, `hsl(${hue} 60% 22%)`)
+  grad.addColorStop(1, `hsl(${(hue + 90) % 360} 70% 45%)`)
+  g.fillStyle = grad
+  g.fillRect(0, 0, 480, 280)
+  for (let i = 0; i < 14; i++) {
+    g.fillStyle = `hsl(${Math.random() * 360} 80% 65% / 0.55)`
+    g.beginPath()
+    g.arc(Math.random() * 480, Math.random() * 280, 8 + Math.random() * 46, 0, Math.PI * 2)
+    g.fill()
+  }
+  g.fillStyle = '#fff'
+  g.font = 'bold 26px ui-monospace, monospace'
+  g.fillText('headerless sample', 20, 250)
+  return new Promise(resolve =>
+    c.toBlob(async blob => {
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      // Safari/Firefox silently fall back to PNG when asked for WebP —
+      // detect() reads magic bytes, so the pipeline stays honest either way.
+      if (blob.type !== type) showError(`this browser cannot encode ${type}; it produced ${blob.type} instead`)
+      resolve({ name: `sample.${blob.type.split('/')[1]}`, bytes })
+    }, type, 0.92)
+  )
+}
+
+for (const btn of document.querySelectorAll('[data-gen]')) {
+  btn.addEventListener('click', async () => {
+    const { name, bytes } = await makeSample(btn.dataset.gen)
+    run(name, bytes)
+  })
+}
+
+const drop = $('drop')
+drop.addEventListener('click', () => $('file').click())
+$('file').addEventListener('change', async e => {
+  const f = e.target.files[0]
+  if (f) run(f.name, new Uint8Array(await f.arrayBuffer()))
+})
+for (const [ev, on] of [['dragover', true], ['dragleave', false], ['drop', false]]) {
+  document.body.addEventListener(ev, async e => {
+    e.preventDefault()
+    drop.classList.toggle('over', on)
+    if (ev === 'drop') {
+      const f = e.dataTransfer.files[0]
+      if (f) run(f.name, new Uint8Array(await f.arrayBuffer()))
+    }
+  })
+}
+</script>
+</body>
+</html>
