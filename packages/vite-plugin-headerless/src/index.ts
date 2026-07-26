@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { access, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { strip } from 'headerless'
 import type { Fragment } from 'headerless'
@@ -138,8 +138,16 @@ export default function headerless(options: HeaderlessOptions): Plugin {
       const outDir = path.resolve(config.root, config.build.outDir)
       // copyPublicDir has already placed the intact copies; overwrite them with
       // the headerless bodies computed from the same sources at buildStart.
+      // Strictly overwrite, never create: another closeBundle step may have
+      // deliberately deleted a matched file from outDir (demo shakers and the
+      // like) and recreating it here would resurrect a shipped asset.
       for (const [rel, { body }] of entries) {
-        await writeFile(path.join(outDir, rel), body)
+        const target = path.join(outDir, rel)
+        const exists = await access(target).then(
+          () => true,
+          () => false
+        )
+        if (exists) await writeFile(target, body)
       }
     }
   }
