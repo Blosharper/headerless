@@ -3,6 +3,8 @@ export type Format = 'png' | 'webp' | 'jpeg'
 
 /** A cut taken out of one file. */
 export interface Fragment {
+  /** Format the cut was made for — restore needs it to regenerate the constant runs. */
+  format: Format
   /** Byte offset where the cut starts. */
   start: number
   /** Number of bytes removed from the file. */
@@ -18,19 +20,35 @@ export interface Fragment {
 /** Where a format's file-unique header fields live. */
 export interface HeaderSpec {
   format: Format
+  /** Byte offset where the cut starts (0 except for JPEG, whose SOF position varies). */
+  start: number
   /** Total bytes to remove from the file. */
   cutLength: number
-  /** Byte ranges within the cut that vary per file (the actual key). */
+  /** Byte ranges within the file that vary per file (the actual key). All lie inside the cut. */
   unique: Array<{ offset: number; length: number }>
 }
 
 export class UnsupportedFormatError extends Error {
-  constructor(public readonly path: string) {
+  constructor(
+    public readonly path: string,
+    reason?: string
+  ) {
     super(
-      `headerless: no parser for "${path}". ` +
+      `headerless: ${reason ?? `no parser for "${path}"`}. ` +
         'Refusing to fall back to a fixed-length cut — that would strip only ' +
         'constant bytes and produce a fragment that is not a key.'
     )
     this.name = 'UnsupportedFormatError'
+  }
+}
+
+/** A file matched a known format but its structure is not what the parser expects. */
+export class ParseError extends Error {
+  constructor(
+    public readonly path: string,
+    detail: string
+  ) {
+    super(`headerless: cannot parse "${path}": ${detail}`)
+    this.name = 'ParseError'
   }
 }
