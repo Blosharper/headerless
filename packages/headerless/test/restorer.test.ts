@@ -53,7 +53,9 @@ describe('AssetRestorer', () => {
     const url = await restorer.ensure(`../${mapKey}`)
 
     expect(url).toBe('blob:test-url')
-    expect(fetchMock).toHaveBeenCalledWith(`../${mapKey}`)
+    // The MAP KEY is fetched, never the caller's original path shape — see the
+    // file:// regression test below for why.
+    expect(fetchMock).toHaveBeenCalledWith(mapKey)
     const blob = createObjectURL.mock.calls[0][0] as Blob
     expect(blob.type).toBe('image/webp')
     expect(new Uint8Array(await blob.arrayBuffer())).toEqual(original)
@@ -61,6 +63,36 @@ describe('AssetRestorer', () => {
     // Second request is a cache hit — no second fetch.
     await expect(restorer.ensure(mapKey)).resolves.toBe('blob:test-url')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("resolves the fetch URL against the document base, not the caller's path (packaged file:// regression)", async () => {
+    // Packaged Electron: the document lives at <app.asar>/dist/index.html and
+    // file:// has no root clamp, so fetching a caller-shaped '../assets/x'
+    // would escape dist/ and 404 — silently tripping the raw-path fallback,
+    // which now serves a STRIPPED body. The map key resolved against the
+    // document base lands on the real dist copy in every environment.
+    const original = makeWebpVp8()
+    const mapKey = 'assets/story/pack.webp'
+    const { serialized, body } = serialize(original, mapKey)
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(body.buffer)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    // Constructible stub — toFetchUrl calls `new URL(key, base)` before fetch.
+    class StubURL extends URL {
+      static createObjectURL = vi.fn().mockReturnValue('blob:packed')
+    }
+    vi.stubGlobal('URL', StubURL)
+    vi.stubGlobal('document', {
+      baseURI: 'file:///Applications/Game.app/Contents/Resources/app.asar/dist/index.html'
+    })
+
+    const restorer = new AssetRestorer({ fragments: { [mapKey]: serialized }, key: KEY })
+    await expect(restorer.ensure(`../${mapKey}`)).resolves.toBe('blob:packed')
+    expect(fetchMock).toHaveBeenCalledWith(
+      `file:///Applications/Game.app/Contents/Resources/app.asar/dist/${mapKey}`
+    )
   })
 
   it('never throws: a failed fetch warns and falls back to the raw path', async () => {
