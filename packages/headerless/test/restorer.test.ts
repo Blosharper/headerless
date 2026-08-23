@@ -127,6 +127,132 @@ describe('AssetRestorer', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('release revokes the cached Blob URL and the next ensure assembles fresh', async () => {
+    const original = makeWebpVp8()
+    const mapKey = 'assets/story/released.webp'
+    const { serialized, body } = serialize(original, mapKey)
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(body.buffer)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const createObjectURL = vi
+      .fn()
+      .mockReturnValueOnce('blob:gen-1')
+      .mockReturnValueOnce('blob:gen-2')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', Object.assign(Object.create(URL), { createObjectURL, revokeObjectURL }))
+
+    const restorer = new AssetRestorer({ fragments: { [mapKey]: serialized }, key: KEY })
+    await expect(restorer.ensure(mapKey)).resolves.toBe('blob:gen-1')
+
+    // Relative '../' prefixes normalize to the same map key as in ensure().
+    restorer.release(`../${mapKey}`)
+    expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:gen-1')
+
+    // Cache miss after release: a re-entry assembles fresh, never the dead URL.
+    await expect(restorer.ensure(mapKey)).resolves.toBe('blob:gen-2')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('release of an unknown path is a safe no-op', () => {
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', Object.assign(Object.create(URL), { revokeObjectURL }))
+
+    const restorer = new AssetRestorer({ fragments: {}, key: '' })
+    expect(() => restorer.release('assets/story/never-seen.webp')).not.toThrow()
+    expect(revokeObjectURL).not.toHaveBeenCalled()
+  })
+
+  it('double release revokes exactly once', async () => {
+    const original = makeWebpVp8()
+    const mapKey = 'assets/story/twice.webp'
+    const { serialized, body } = serialize(original, mapKey)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, arrayBuffer: () => Promise.resolve(body.buffer) })
+    )
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal(
+      'URL',
+      Object.assign(Object.create(URL), {
+        createObjectURL: vi.fn().mockReturnValue('blob:once'),
+        revokeObjectURL
+      })
+    )
+
+    const restorer = new AssetRestorer({ fragments: { [mapKey]: serialized }, key: KEY })
+    await restorer.ensure(mapKey)
+    restorer.release(mapKey)
+    restorer.release(mapKey)
+    expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:once')
+  })
+
+  it('release during an in-flight assembly revokes the URL on arrival and never caches it', async () => {
+    const original = makeWebpVp8()
+    const mapKey = 'assets/story/torn-down.webp'
+    const { serialized, body } = serialize(original, mapKey)
+    // Deferred responses so the test controls when each assembly settles.
+    const responders: Array<(response: unknown) => void> = []
+    const fetchMock = vi.fn(() => new Promise(resolve => responders.push(resolve)))
+    vi.stubGlobal('fetch', fetchMock)
+    const createObjectURL = vi
+      .fn()
+      .mockReturnValueOnce('blob:doomed')
+      .mockReturnValueOnce('blob:fresh')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', Object.assign(Object.create(URL), { createObjectURL, revokeObjectURL }))
+
+    const restorer = new AssetRestorer({ fragments: { [mapKey]: serialized }, key: KEY })
+    const doomed = restorer.ensure(mapKey) // not awaited — the screen is being torn down
+    restorer.release(mapKey)
+    expect(revokeObjectURL).not.toHaveBeenCalled() // nothing to revoke yet
+
+    responders[0]({ ok: true, arrayBuffer: () => Promise.resolve(body.buffer) })
+    await doomed
+    // The settled URL is revoked the moment it arrives, and was never cached:
+    // the entry cannot be resurrected after its release.
+    expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:doomed')
+
+    // Clean re-entry: a fresh assembly, not the revoked URL.
+    const reentry = restorer.ensure(mapKey)
+    responders[1]({ ok: true, arrayBuffer: () => Promise.resolve(body.buffer) })
+    await expect(reentry).resolves.toBe('blob:fresh')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await expect(restorer.ensure(mapKey)).resolves.toBe('blob:fresh') // cached again
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('a re-entry while the doomed assembly is still settling gets a fresh assembly', async () => {
+    const original = makeWebpVp8()
+    const mapKey = 'assets/story/reborn.webp'
+    const { serialized, body } = serialize(original, mapKey)
+    const responders: Array<(response: unknown) => void> = []
+    const fetchMock = vi.fn(() => new Promise(resolve => responders.push(resolve)))
+    vi.stubGlobal('fetch', fetchMock)
+    const createObjectURL = vi
+      .fn()
+      .mockReturnValueOnce('blob:doomed')
+      .mockReturnValueOnce('blob:fresh')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', Object.assign(Object.create(URL), { createObjectURL, revokeObjectURL }))
+
+    const restorer = new AssetRestorer({ fragments: { [mapKey]: serialized }, key: KEY })
+    const doomed = restorer.ensure(mapKey)
+    restorer.release(mapKey)
+    // Re-enter BEFORE the doomed assembly settles: release evicted its pending
+    // entry, so this starts a new assembly instead of joining the doomed one.
+    const reentry = restorer.ensure(mapKey)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    responders[0]({ ok: true, arrayBuffer: () => Promise.resolve(body.buffer) })
+    responders[1]({ ok: true, arrayBuffer: () => Promise.resolve(body.buffer) })
+    await expect(doomed).resolves.toBe('blob:doomed')
+    await expect(reentry).resolves.toBe('blob:fresh')
+    expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:doomed')
+    await expect(restorer.ensure(mapKey)).resolves.toBe('blob:fresh') // the survivor is cached
+  })
+
   it('prefetch assembles every mapped path in the batch', async () => {
     const original = makeWebpVp8()
     const mapKey = 'assets/story/pre.webp'
