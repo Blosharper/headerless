@@ -43,8 +43,9 @@ function base64ToBytes(b64: string): Uint8Array {
  *   root and breaks every protected asset under a packaged `file://` origin.
  * - Nothing throws past this class: a failed fetch or splice logs a warning
  *   and falls back to the raw path. A broken image beats a hung app.
- * - Blob URLs are cached for the session; concurrent requests for the same
- *   path share one in-flight assembly.
+ * - Blob URLs are cached until released; concurrent requests for the same
+ *   path share one in-flight assembly. `release()` revokes a URL and evicts
+ *   its cache entry as one operation — including assemblies still in flight.
  */
 export class AssetRestorer {
   private readonly fragments: Record<string, SerializedFragment>
@@ -94,7 +95,21 @@ export class AssetRestorer {
 
     let assembling = this.pending.get(mapKey)
     if (!assembling) {
-      assembling = this.assemble(path, mapKey).finally(() => this.pending.delete(mapKey))
+      assembling = this.assemble(mapKey).then(url => {
+        // Liveness check: `release()` dooms an in-flight assembly by evicting
+        // its `pending` entry. The entry's identity is the liveness token — if
+        // this assembly is no longer the registered one, its URL is revoked on
+        // arrival and never cached, so a released path can't be resurrected.
+        const live = this.pending.get(mapKey) === assembling
+        if (live) this.pending.delete(mapKey)
+        if (url === null) return path // assembly failed → raw-path fallback
+        if (!live) {
+          URL.revokeObjectURL(url)
+          return url
+        }
+        this.cache.set(mapKey, url)
+        return url
+      })
       this.pending.set(mapKey, assembling)
     }
     return assembling
@@ -105,7 +120,35 @@ export class AssetRestorer {
     await Promise.all(paths.map(p => this.ensure(p)))
   }
 
-  private async assemble(originalPath: string, mapKey: string): Promise<string> {
+  /**
+   * Revoke the Blob URL held for `path` and evict its cache entry, as one
+   * operation. The pair is deliberately not offered separately: a consumer
+   * calling `URL.revokeObjectURL` on its own leaves the dead URL in the
+   * cache, and every later `ensure()` serves it forever.
+   *
+   * - A path with no entry (unknown, unmapped, or already released) passes
+   *   through harmlessly — symmetric with `ensure()`'s pass-through contract.
+   * - An assembly still in flight is doomed rather than cancelled: evicting
+   *   its `pending` entry makes the settle handler revoke the fresh URL the
+   *   moment it arrives, without caching it. Cancelling would reject a
+   *   promise other concurrent callers already hold — this class never
+   *   throws past itself.
+   * - After `release()`, the next `ensure()` assembles fresh — even while a
+   *   doomed assembly is still settling.
+   */
+  public release(path: string): void {
+    const mapKey = this.toMapKey(path)
+    const url = this.cache.get(mapKey)
+    if (url !== undefined) {
+      this.cache.delete(mapKey)
+      URL.revokeObjectURL(url)
+    }
+    this.pending.delete(mapKey)
+  }
+
+  /** The assembled Blob URL, or null if assembly failed. Cache-agnostic —
+   *  `ensure()`'s settle handler decides whether the result may be kept. */
+  private async assemble(mapKey: string): Promise<string | null> {
     try {
       const serialized = this.fragments[mapKey]
       const response = await fetch(this.bodyUrl(mapKey))
@@ -123,11 +166,10 @@ export class AssetRestorer {
       const url = URL.createObjectURL(
         new Blob([bytes.buffer as ArrayBuffer], { type: MIME[serialized.format] })
       )
-      this.cache.set(mapKey, url)
       return url
     } catch (err) {
       console.warn(`[headerless] assembly failed for ${mapKey}, serving the raw path:`, err)
-      return originalPath
+      return null
     }
   }
 }
