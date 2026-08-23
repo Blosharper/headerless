@@ -1,0 +1,32 @@
+# CI: build both workspaces, then run their vitest suites.
+#
+# The build is part of the gate: vite-plugin-headerless generates its .d.ts
+# against the workspace-linked headerless dist, so a broken core build fails
+# here before it can fail a publish.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # A pull request opened by GITHUB_TOKEN — release-please's — starts no
+  # workflow, so the release branch can be tested on demand from the Actions
+  # tab instead. See RELEASING.md.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test

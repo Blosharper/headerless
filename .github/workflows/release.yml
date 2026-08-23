@@ -1,0 +1,93 @@
+# Release: the cut is one click, and no credential exists to leak.
+#
+# Every push to main hands the commits to release-please, which keeps a
+# release pull request open — next versions derived from the
+# conventional-commit subjects, per-package CHANGELOG.md generated,
+# package.json bumped. Merging that pull request is the release: the resulting
+# push runs this workflow again, release-please tags each released package
+# (headerless-vX.Y.Z / vite-plugin-headerless-vX.Y.Z), cuts the GitHub
+# releases, and the same run publishes to npm over OIDC (trusted publishing) —
+# no npm token, no OTP.
+#
+# Two constraints are load-bearing, do not "simplify" them away:
+#   - The publish must stay in THIS file. npm's trusted publisher for both
+#     packages is pinned to the workflow filename `release.yml`.
+#   - It must stay on a GitHub-hosted runner. npm does not support OIDC from
+#     self-hosted runners.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # release commit, tags, GitHub releases
+      pull-requests: write # open and update the release PR
+      issues: write # release-please labels
+      id-token: write # OIDC token for npm trusted publishing
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          # GITHUB_TOKEN is the intended default here. Its one limitation is
+          # that a PR it opens does not start other workflows, so the release
+          # PR carries no CI checks of its own — see RELEASING.md for why that
+          # is acceptable and how to opt into RELEASE_PLEASE_TOKEN if it ever
+          # is not. The fallback below needs no edit to this file.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Everything below runs only on the push that merged the release PR.
+      # That push IS the release commit, and every tag release-please just
+      # created points at it — so the default checkout of github.sha is the
+      # tagged tree, whichever subset of packages released.
+      - uses: actions/checkout@v4
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+
+      - uses: actions/setup-node@v4
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Node 22 ships npm 10; OIDC exchange landed in npm 11.5.1.
+      - name: Use an npm that speaks OIDC
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Install dependencies
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        run: npm ci
+
+      # Build every workspace up front, in workspace order (core first):
+      # vite-plugin-headerless generates its .d.ts against the workspace-linked
+      # headerless, so the core's dist must exist even on a run where only the
+      # plugin is released. Each publish below re-runs its own build via
+      # prepublishOnly; this step just guarantees the cross-package input.
+      - name: Build workspaces
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        run: npm run build
+
+      # Core before plugin, so a release that includes both never publishes a
+      # plugin whose dependency range names a version the registry has not
+      # seen yet.
+      - name: Publish headerless to npm
+        if: ${{ steps.release.outputs['packages/headerless--release_created'] == 'true' }}
+        run: npm publish --provenance --access public --workspace packages/headerless
+
+      - name: Publish vite-plugin-headerless to npm
+        if: ${{ steps.release.outputs['packages/vite-plugin-headerless--release_created'] == 'true' }}
+        run: npm publish --provenance --access public --workspace packages/vite-plugin-headerless

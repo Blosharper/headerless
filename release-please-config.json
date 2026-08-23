@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "bump-minor-pre-major": true,
+  "bootstrap-sha": "487299e8fb909e3d9461eb52b883b2cb01b98fc1",
+  "pull-request-title-pattern": "release: ${component} v${version}",
+  "group-pull-request-title-pattern": "release: ${branch}",
+  "packages": {
+    "packages/headerless": {
+      "package-name": "headerless"
+    },
+    "packages/vite-plugin-headerless": {
+      "package-name": "vite-plugin-headerless"
+    }
+  },
+  "plugins": [{ "type": "node-workspace" }]
+}
