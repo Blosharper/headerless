@@ -10,8 +10,9 @@ on:
     branches: [main]
   pull_request:
   # A pull request opened by GITHUB_TOKEN — release-please's — starts no
-  # workflow, so the release branch can be tested on demand from the Actions
-  # tab instead. See RELEASING.md.
+  # workflow, so release.yml dispatches this one onto the release branch to
+  # put a real `test` check on the release PR. Also works by hand from the
+  # Actions tab. See RELEASING.md.
   workflow_dispatch:
 
 permissions:
