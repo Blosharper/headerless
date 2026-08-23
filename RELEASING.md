@@ -103,8 +103,10 @@ releases.
 
 ### The registry side (owner, npmjs.com)
 
-**Configured — recorded here for when it needs to change.** The form needs
-the package owner's npm account, once per package:
+**Owner-side, and the one step this automation can neither do nor verify.**
+The form needs the package owner's npm account, once per package — and until
+it matches, every automated publish fails with `ENEEDAUTH` (npm finds no
+trusted publisher willing to exchange its OIDC token):
 
 npmjs.com → *package* → **Settings** → **Trusted Publisher** → *GitHub
 Actions*, filled in identically for **`headerless`** and
