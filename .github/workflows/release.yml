@@ -146,11 +146,16 @@ jobs:
       - uses: actions/checkout@v4
         if: ${{ steps.release.outputs.releases_created == 'true' }}
 
+      # No registry-url here, deliberately: setup-node's registry-url writes
+      # an .npmrc whose _authToken (a placeholder when NODE_AUTH_TOKEN is
+      # unset) preempts npm's OIDC exchange — the publish then presents that
+      # placeholder as a real token and the registry masks the rejection as
+      # E404. With no auth configured at all, npm falls through to trusted
+      # publishing.
       - uses: actions/setup-node@v4
         if: ${{ steps.release.outputs.releases_created == 'true' }}
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
 
       # Node 22 ships npm 10; OIDC exchange landed in npm 11.5.1.
       - name: Use an npm that speaks OIDC
