@@ -1,6 +1,6 @@
 {
   "name": "headerless",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Strips format-defining header fields from binary assets at build time. Bundler-agnostic core.",
   "type": "module",
   "main": "./dist/index.cjs",
