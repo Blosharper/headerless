@@ -188,14 +188,25 @@ left behind — a merged release pull request whose dispatch never fired, an
 open one whose drive failed — is picked up and completed. A sweeper run with
 nothing to do exits in seconds.
 
+**The one state the sweeper cannot reach** is a release that was tagged but
+whose npm publish then failed: release-please will not re-emit an
+already-tagged release, so no later run retries the publish on its own. For
+that there is the `republish` input on `release.yml`'s manual trigger —
+**Actions → release → Run workflow →** enter the existing tag (say
+`headerless-v0.2.0`; one tag per run). That run skips the driver, checks out
+the tag, and publishes just that package, authenticating over OIDC as always.
+Fix whatever failed the publish first; the tag and the GitHub release need no
+touch.
+
 **What a human can still do.** Everything, just none of it is required:
 dispatch `ci.yml` onto the release branch from the Actions tab; squash-merge
 the release pull request by hand (the resulting push tags and publishes as
-always); dispatch `release.yml` on `main` to force a sweep right now. The one
-rule: do not push your own commits to the release branch — release-please
-owns it and will overwrite. The branch is named by release-please from its
-config, so anything scripted reads it from the pull request rather than
-hard-coding it: `gh pr view <n> --json headRefName`.
+always); dispatch `release.yml` on `main` to force a sweep right now, or with
+`republish` set to retry a failed publish. The one rule: do not push your own
+commits to the release branch — release-please owns it and will overwrite.
+The branch is named by release-please from its config, so anything scripted
+reads it from the pull request rather than hard-coding it:
+`gh pr view <n> --json headRefName`.
 
 **The PAT escape hatch** remains wired but unused: store a fine-grained
 personal access token scoped to this repository (**Contents: read and

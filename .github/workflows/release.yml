@@ -28,6 +28,16 @@ on:
   # suppression). Doubles as the manual lever: Actions → release → Run
   # workflow.
   workflow_dispatch:
+    inputs:
+      # Recovery lever for the one state neither the driver nor the sweeper
+      # can reach: a release that was tagged but whose npm publish failed.
+      # release-please will not re-emit an already-tagged release, so a run
+      # with this input skips the driver, checks out the named tag, and
+      # publishes that package alone. One tag per run.
+      republish:
+        description: 'Existing tag to re-publish after a publish-side failure (e.g. headerless-v0.2.0). Leave empty normally.'
+        required: false
+        default: ''
   # Sweeper: converges anything the dispatch handoff dropped — a release PR
   # merged without its follow-up run, or an open release PR whose drive
   # failed. A run that finds nothing to do exits in seconds.
@@ -77,7 +87,7 @@ jobs:
       # dropped handoff leaves behind. A ci failure fails this run before any
       # merge — fix main, and the next push (or the sweeper) retries.
       - name: Drive the release PR to a tested merge
-        if: ${{ steps.release.outputs.releases_created != 'true' }}
+        if: ${{ steps.release.outputs.releases_created != 'true' && inputs.republish == '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -139,12 +149,15 @@ jobs:
 
       # Everything below runs only in the run that finds the merged release
       # PR — the follow-up run the driver dispatched, the push of a hand
-      # merge, or a sweeper run catching up. github.sha in those runs is the
-      # release commit every tag release-please just created points at, so
-      # the default checkout is the tagged tree, whichever subset of packages
-      # released.
+      # merge, or a sweeper run catching up — or in a republish run. In the
+      # normal case github.sha is the release commit every tag release-please
+      # just created points at, so the default checkout is the tagged tree,
+      # whichever subset of packages released; a republish run checks out the
+      # named tag instead (an empty ref means the default).
       - uses: actions/checkout@v4
-        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' || inputs.republish != '' }}
+        with:
+          ref: ${{ inputs.republish }}
 
       # No registry-url here, deliberately: setup-node's registry-url writes
       # an .npmrc whose _authToken (a placeholder when NODE_AUTH_TOKEN is
@@ -153,19 +166,19 @@ jobs:
       # E404. With no auth configured at all, npm falls through to trusted
       # publishing.
       - uses: actions/setup-node@v4
-        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' || inputs.republish != '' }}
         with:
           node-version: 22
 
       # Node 22 ships npm 10; OIDC exchange landed in npm 11.5.1.
       - name: Use an npm that speaks OIDC
-        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' || inputs.republish != '' }}
         run: |
           npm install -g npm@latest
           npm --version
 
       - name: Install dependencies
-        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' || inputs.republish != '' }}
         run: npm ci
 
       # Build every workspace up front, in workspace order (core first):
@@ -174,16 +187,16 @@ jobs:
       # plugin is released. Each publish below re-runs its own build via
       # prepublishOnly; this step just guarantees the cross-package input.
       - name: Build workspaces
-        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' || inputs.republish != '' }}
         run: npm run build
 
       # Core before plugin, so a release that includes both never publishes a
       # plugin whose dependency range names a version the registry has not
       # seen yet.
       - name: Publish headerless to npm
-        if: ${{ steps.release.outputs['packages/headerless--release_created'] == 'true' }}
+        if: ${{ steps.release.outputs['packages/headerless--release_created'] == 'true' || startsWith(inputs.republish, 'headerless-v') }}
         run: npm publish --provenance --access public --workspace packages/headerless
 
       - name: Publish vite-plugin-headerless to npm
-        if: ${{ steps.release.outputs['packages/vite-plugin-headerless--release_created'] == 'true' }}
+        if: ${{ steps.release.outputs['packages/vite-plugin-headerless--release_created'] == 'true' || startsWith(inputs.republish, 'vite-plugin-headerless-v') }}
         run: npm publish --provenance --access public --workspace packages/vite-plugin-headerless
