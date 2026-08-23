@@ -1,13 +1,16 @@
-# Release: the cut is one click, and no credential exists to leak.
+# Release: the cut is zero clicks, and no credential exists to leak.
 #
 # Every push to main hands the commits to release-please, which keeps a
 # release pull request open — next versions derived from the
 # conventional-commit subjects, per-package CHANGELOG.md generated,
-# package.json bumped. Merging that pull request is the release: the resulting
-# push runs this workflow again, release-please tags each released package
-# (headerless-vX.Y.Z / vite-plugin-headerless-vX.Y.Z), cuts the GitHub
-# releases, and the same run publishes to npm over OIDC (trusted publishing) —
-# no npm token, no OTP.
+# package.json bumped. This workflow then drives that pull request home on
+# its own: it dispatches a real ci run onto the release branch, waits for the
+# required `test` check to pass, squash-merges, and hands off to a fresh run
+# of this workflow — which finds the merged release, tags each released
+# package (headerless-vX.Y.Z / vite-plugin-headerless-vX.Y.Z), cuts the
+# GitHub releases, and publishes to npm over OIDC (trusted publishing) — no
+# npm token, no OTP, no PAT, no human in the loop. Merging the release PR by
+# hand still works and simply short-circuits the driver.
 #
 # Two constraints are load-bearing, do not "simplify" them away:
 #   - The publish must stay in THIS file. npm's trusted publisher for both
@@ -19,6 +22,17 @@ name: release
 on:
   push:
     branches: [main]
+  # The driver below merges with GITHUB_TOKEN, and a GITHUB_TOKEN push starts
+  # no workflows — so the merging run dispatches this workflow again to do
+  # the tag-and-publish half (workflow_dispatch is exempt from that
+  # suppression). Doubles as the manual lever: Actions → release → Run
+  # workflow.
+  workflow_dispatch:
+  # Sweeper: converges anything the dispatch handoff dropped — a release PR
+  # merged without its follow-up run, or an open release PR whose drive
+  # failed. A run that finds nothing to do exits in seconds.
+  schedule:
+    - cron: '23 3 * * *'
 
 permissions: {}
 
@@ -32,26 +46,103 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write # release commit, tags, GitHub releases
-      pull-requests: write # open and update the release PR
+      pull-requests: write # open, update, and merge the release PR
       issues: write # release-please labels
+      actions: write # dispatch ci onto the release branch, and this workflow after a bot merge
       id-token: write # OIDC token for npm trusted publishing
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
-          # GITHUB_TOKEN is the intended default here. Its one limitation is
-          # that a PR it opens does not start other workflows, so the release
-          # PR carries no CI checks of its own — see RELEASING.md for why that
-          # is acceptable and how to opt into RELEASE_PLEASE_TOKEN if it ever
-          # is not. The fallback below needs no edit to this file.
+          # GITHUB_TOKEN is the intended default here; RELEASE_PLEASE_TOKEN
+          # is an optional escape hatch that needs no edit to this file — see
+          # RELEASING.md. GITHUB_TOKEN's one limitation — a PR it opens
+          # starts no pull_request workflows, so the required `test` check
+          # never appears on its own — is what the driver step below exists
+          # to close.
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # Everything below runs only on the push that merged the release PR.
-      # That push IS the release commit, and every tag release-please just
-      # created points at it — so the default checkout of github.sha is the
-      # tagged tree, whichever subset of packages released.
+      # --- The zero-touch driver ------------------------------------------
+      # Branch protection requires the `test` check on main, and a PR opened
+      # with GITHUB_TOKEN carries none. This step closes the gap without a
+      # PAT: dispatch ci.yml onto the release branch (a workflow_dispatch
+      # fired by GITHUB_TOKEN does start a run — it is exempt from GitHub's
+      # recursive-run suppression), wait for it to go green on the PR head,
+      # then squash-merge. The merge push is GITHUB_TOKEN's too and triggers
+      # nothing, so the last act hands tag-and-publish to a fresh run of this
+      # workflow. Convergence: that dispatched run creates the releases, so
+      # this step is skipped there; the daily schedule sweeps up anything a
+      # dropped handoff leaves behind. A ci failure fails this run before any
+      # merge — fix main, and the next push (or the sweeper) retries.
+      - name: Drive the release PR to a tested merge
+        if: ${{ steps.release.outputs.releases_created != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr_json=$(gh pr list --state open --label 'autorelease: pending' \
+            --json number,headRefName,headRefOid --jq '.[0] // empty')
+          if [ -z "$pr_json" ]; then
+            echo 'No open release PR — nothing to drive.'
+            exit 0
+          fi
+          pr=$(jq -r .number <<<"$pr_json")
+          branch=$(jq -r .headRefName <<<"$pr_json")
+          head=$(jq -r .headRefOid <<<"$pr_json")
+          echo "Release PR #$pr ($branch @ $head)"
+
+          green_tests() {
+            gh api "repos/$GH_REPO/commits/$1/check-runs" --jq \
+              '[.check_runs[] | select(.name == "test" and .conclusion == "success")] | length'
+          }
+
+          if [ "$(green_tests "$head")" -eq 0 ]; then
+            since=$(date -u -d '30 seconds ago' +%Y-%m-%dT%H:%M:%SZ)
+            gh workflow run ci.yml --ref "$branch"
+            echo 'Dispatched ci onto the release branch; waiting for its run…'
+            run_id=''
+            for _ in $(seq 1 18); do
+              sleep 10
+              run_id=$(gh run list --workflow ci.yml --branch "$branch" \
+                --event workflow_dispatch --limit 5 \
+                --json databaseId,headSha,createdAt |
+                jq -r --arg sha "$head" --arg t "$since" \
+                  '[.[] | select(.headSha == $sha and .createdAt >= $t)][0].databaseId // empty')
+              [ -n "$run_id" ] && break
+            done
+            if [ -z "$run_id" ]; then
+              echo '::error::The dispatched ci run never appeared.'
+              exit 1
+            fi
+            state=''
+            for _ in $(seq 1 40); do
+              sleep 15
+              state=$(gh run view "$run_id" --json status,conclusion \
+                --jq '.status + "/" + (.conclusion // "")')
+              echo "ci run $run_id: $state"
+              [ "${state%%/*}" = completed ] && break
+            done
+            if [ "$state" != completed/success ]; then
+              echo "::error::ci did not pass on the release branch (run $run_id: $state)."
+              exit 1
+            fi
+          fi
+
+          echo "test is green on $head — merging release PR #$pr"
+          gh pr merge "$pr" --squash
+
+          echo 'Handing tag-and-publish to a fresh run of this workflow.'
+          gh workflow run release.yml --ref main
+
+      # Everything below runs only in the run that finds the merged release
+      # PR — the follow-up run the driver dispatched, the push of a hand
+      # merge, or a sweeper run catching up. github.sha in those runs is the
+      # release commit every tag release-please just created points at, so
+      # the default checkout is the tagged tree, whichever subset of packages
+      # released.
       - uses: actions/checkout@v4
         if: ${{ steps.release.outputs.releases_created == 'true' }}
 
