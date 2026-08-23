@@ -59,20 +59,6 @@ export class AssetRestorer {
     return path.replace(/^(?:\.\.\/)+|^\/+/, '')
   }
 
-  /**
-   * The URL the stripped body is fetched from. Map keys are relative to the
-   * served asset root, which sits next to the document (publicDir contents are
-   * copied to the outDir root) — so resolve the KEY against the document base,
-   * never the caller's original path shape: '../assets/x' only works in CSS via
-   * stylesheet-relative resolution, and while http servers clamp '../' at the
-   * root, packaged file:// pages (Electron/Capacitor) have no clamp — the
-   * request escapes the app directory and every assembly silently falls back
-   * to the stripped body.
-   */
-  private toFetchUrl(mapKey: string): string {
-    return typeof document === 'undefined' ? mapKey : new URL(mapKey, document.baseURI).toString()
-  }
-
   /** A displayable URL — a Blob URL for mapped paths, the input path otherwise. */
   public async ensure(path: string): Promise<string> {
     const mapKey = this.toMapKey(path)
@@ -97,7 +83,7 @@ export class AssetRestorer {
   private async assemble(originalPath: string, mapKey: string): Promise<string> {
     try {
       const serialized = this.fragments[mapKey]
-      const response = await fetch(this.toFetchUrl(mapKey))
+      const response = await fetch(originalPath)
       if (!response.ok) throw new Error(`fetch failed: ${response.status}`)
       const body = new Uint8Array(await response.arrayBuffer())
       const fragment: Fragment = {
