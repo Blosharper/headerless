@@ -112,7 +112,7 @@ npmjs.com → *package* → **Settings** → **Trusted Publisher** → *GitHub
 Actions*, filled in identically for **`headerless`** and
 **`vite-plugin-headerless`**:
 
-- Organization or user: `firejune`
+- Organization or user: `Blosharper`
 - Repository: `headerless`
 - Workflow filename: `release.yml`
 - Environment name: *blank* (the workflow declares no environment; a value
