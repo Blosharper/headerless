@@ -61,11 +61,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/firejune/headerless.git",
+    "url": "git+https://github.com/Blosharper/headerless.git",
     "directory": "packages/vite-plugin-headerless"
   },
   "bugs": {
-    "url": "https://github.com/firejune/headerless/issues"
+    "url": "https://github.com/Blosharper/headerless/issues"
   },
-  "homepage": "https://github.com/firejune/headerless#readme"
+  "homepage": "https://github.com/Blosharper/headerless#readme"
 }

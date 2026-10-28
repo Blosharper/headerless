@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.4](https://github.com/firejune/headerless/compare/vite-plugin-headerless-v0.1.3...vite-plugin-headerless-v0.1.4) (2026-08-23)
+## [0.1.4](https://github.com/Blosharper/headerless/compare/vite-plugin-headerless-v0.1.3...vite-plugin-headerless-v0.1.4) (2026-08-23)
 
 
 ### Dependencies
