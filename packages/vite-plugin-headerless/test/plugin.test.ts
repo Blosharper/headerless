@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { strip } from 'headerless'
-import { build } from 'vite'
+import { build, resolveConfig } from 'vite'
 import { describe, expect, it } from 'vitest'
 import headerless from '../src/index'
 
@@ -105,6 +105,46 @@ describe('vite build integration', () => {
     await expect(build({ root, logLevel: 'silent', plugins: [plugin()] })).rejects.toThrow(
       /referenced from CSS/
     )
+  })
+})
+
+describe('config hook', () => {
+  it('excludes the package from dependency pre-bundling', async () => {
+    const { root } = await scaffold()
+    const resolved = await resolveConfig({ root, logLevel: 'silent', plugins: [plugin()] }, 'serve')
+    expect(resolved.optimizeDeps.exclude).toContain('vite-plugin-headerless')
+  })
+
+  it('extends a user-supplied exclude list instead of replacing it', async () => {
+    const { root } = await scaffold()
+    const resolved = await resolveConfig(
+      {
+        root,
+        logLevel: 'silent',
+        plugins: [plugin()],
+        optimizeDeps: { exclude: ['some-user-dep', 'another-user-dep'] }
+      },
+      'serve'
+    )
+    expect(resolved.optimizeDeps.exclude).toEqual([
+      'some-user-dep',
+      'another-user-dep',
+      'vite-plugin-headerless'
+    ])
+  })
+
+  it('does not duplicate the entry when the user already excludes the package', async () => {
+    const { root } = await scaffold()
+    const resolved = await resolveConfig(
+      {
+        root,
+        logLevel: 'silent',
+        plugins: [plugin()],
+        optimizeDeps: { exclude: ['vite-plugin-headerless'] }
+      },
+      'serve'
+    )
+    expect(resolved.optimizeDeps.exclude).toEqual(['vite-plugin-headerless'])
   })
 })
 

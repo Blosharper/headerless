@@ -32,10 +32,7 @@ export default defineConfig({
       include: ['assets/**/*.{png,jpg,jpeg,webp}'],
       key: 'replace-with-your-own-key'
     })
-  ],
-  // Required for `vite` (dev): the runtime entry imports a virtual module that
-  // Vite's dependency pre-bundler cannot resolve.
-  optimizeDeps: { exclude: ['vite-plugin-headerless'] }
+  ]
 })
 ```
 
@@ -82,6 +79,7 @@ For TypeScript, add `"types": ["vite-plugin-headerless/client"]` to `tsconfig.js
 
 | Hook | Work |
 | --- | --- |
+| `config` | exclude this package from dependency pre-bundling, so the `/runtime` entry's virtual import resolves under `vite` (dev); a user-supplied `optimizeDeps.exclude` is extended, not replaced |
 | `buildStart` | detect format, cut the file-unique header, XOR-mask it, expose the fragment map |
 | `generateBundle` | fail the build if a stripped file is referenced from emitted CSS |
 | `closeBundle` | overwrite the copies already emitted to `outDir` with the stripped bodies |

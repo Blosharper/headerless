@@ -25,6 +25,9 @@ interface StrippedEntry {
   body: Uint8Array
 }
 
+/** This package's own name, as it appears in a consumer's bare imports. */
+const PACKAGE_NAME = 'vite-plugin-headerless'
+
 /**
  * Three hooks, no build-target branching:
  *
@@ -34,7 +37,9 @@ interface StrippedEntry {
  *   serve (dev)  expose an empty map, leave the sources untouched
  *
  * dev and build differ by DATA (an empty map), never by a code branch, so the
- * runtime loader executes an identical path everywhere.
+ * runtime loader executes an identical path everywhere. The `config` hook only
+ * keeps this package out of dependency pre-bundling, so that the `/runtime`
+ * entry's virtual import resolves in dev without any consumer configuration.
  */
 export default function headerless(options: HeaderlessOptions): Plugin {
   const virtualId = options.virtualId ?? 'virtual:headerless'
@@ -47,6 +52,18 @@ export default function headerless(options: HeaderlessOptions): Plugin {
 
   return {
     name: 'vite-plugin-headerless',
+
+    config(userConfig) {
+      // The `/runtime` entry imports `virtual:headerless`, which only this
+      // plugin can resolve. Vite's dependency pre-bundler runs esbuild without
+      // user plugins, so a pre-bundled copy of this package fails to resolve
+      // that import and the dev server exits. Excluding the package (subpath
+      // entries included) leaves `/runtime` to the regular plugin pipeline.
+      // Vite concatenates arrays when it merges a returned partial config, so
+      // a user-supplied exclude list is extended, never replaced.
+      if (userConfig.optimizeDeps?.exclude?.includes(PACKAGE_NAME)) return
+      return { optimizeDeps: { exclude: [PACKAGE_NAME] } }
+    },
 
     configResolved(resolved) {
       config = resolved
