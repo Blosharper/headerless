@@ -1,6 +1,6 @@
 {
   "name": "vite-plugin-headerless",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Vite plugin that strips format-defining header fields from binary assets at build time",
   "type": "module",
   "main": "./dist/index.cjs",
