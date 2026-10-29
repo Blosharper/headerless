@@ -46,10 +46,7 @@ export default defineConfig({
       include: ['assets/**/*.{png,jpg,jpeg,webp}'],
       key: 'replace-with-your-own-key'
     })
-  ],
-  // Required for `vite` (dev): the runtime entry imports a virtual module that
-  // Vite's dependency pre-bundler cannot resolve.
-  optimizeDeps: { exclude: ['vite-plugin-headerless'] }
+  ]
 })
 ```
 
