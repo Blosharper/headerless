@@ -1,3 +1,9 @@
+![headerless — Strips format-defining header fields from binary assets at build time, and puts them back in memory at runtime.](https://raw.githubusercontent.com/Blosharper/headerless/main/.github/assets/banner.png)
+
+[![npm version](https://img.shields.io/npm/v/headerless)](https://www.npmjs.com/package/headerless)
+[![npm downloads](https://img.shields.io/npm/dm/headerless)](https://www.npmjs.com/package/headerless)
+[![license](https://img.shields.io/npm/l/headerless)](LICENSE)
+
 # headerless
 
 Strips format-defining header fields from binary assets at build time, and puts them back in memory at runtime.
